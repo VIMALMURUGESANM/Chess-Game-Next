@@ -1,7 +1,14 @@
 export type Piece = 'p' | 'r' | 'n' | 'b' | 'q' | 'k' | 'P' | 'R' | 'N' | 'B' | 'Q' | 'K' | '';
 export type Board = Piece[][];
 
-export function getValidMoves(board: Board, row: number, col: number, considerPin: boolean = true): [number, number][] {
+export function getValidMoves(
+    board: Board,
+    row: number,
+    col: number,
+    considerPin: boolean = true,
+    canCastleKingside: boolean = false,
+    canCastleQueenside: boolean = false
+): [number, number][] {
     const piece = board[row][col];
     const isWhite = piece === piece.toUpperCase();
     let moves: [number, number][] = [];
@@ -12,11 +19,11 @@ export function getValidMoves(board: Board, row: number, col: number, considerPi
         case 'n': moves = getKnightMoves(board, row, col, isWhite); break;
         case 'b': moves = getBishopMoves(board, row, col, isWhite); break;
         case 'q': moves = getQueenMoves(board, row, col, isWhite); break;
-        case 'k': moves = getKingMoves(board, row, col, isWhite); break;
+        case 'k': moves = getKingMoves(board, row, col, isWhite, canCastleKingside, canCastleQueenside); break;
     }
 
     if (considerPin) {
-        moves = moves.filter(([newRow, newCol]) => !movePutsOwnKingInCheck(board, row, col, newRow, newCol));
+        moves = moves.filter(([newRow, newCol]) => !movePutsOwnKingInCheck(board, row, col, newRow, newCol, isWhite));
     }
 
     return moves;
@@ -70,7 +77,7 @@ function getQueenMoves(board: Board, row: number, col: number, isWhite: boolean)
     return [...getStraightMoves(board, row, col, isWhite), ...getDiagonalMoves(board, row, col, isWhite)];
 }
 
-function getKingMoves(board: Board, row: number, col: number, isWhite: boolean): [number, number][] {
+function getKingMoves(board: Board, row: number, col: number, isWhite: boolean, canCastleKingside: boolean, canCastleQueenside: boolean): [number, number][] {
     const moves: [number, number][] = [];
     const kingMoves = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]];
 
@@ -82,7 +89,84 @@ function getKingMoves(board: Board, row: number, col: number, isWhite: boolean):
         }
     }
 
+    moves.push(...getCastlingMoves(board, row, col, isWhite, canCastleKingside, canCastleQueenside));
+
     return moves;
+}
+
+function getCastlingMoves(board: Board, row: number, col: number, isWhite: boolean, canCastleKingside: boolean, canCastleQueenside: boolean): [number, number][] {
+    const castlingMoves: [number, number][] = [];
+    
+    if (isCheck(board, isWhite)) return castlingMoves;
+
+    const backRank = isWhite ? 7 : 0;
+    
+    if (canCastleKingside && board[backRank][5] === '' && board[backRank][6] === '') {
+        if (!isSquareUnderAttack(board, backRank, 4, isWhite) &&
+            !isSquareUnderAttack(board, backRank, 5, isWhite) &&
+            !isSquareUnderAttack(board, backRank, 6, isWhite)) {
+            castlingMoves.push([backRank, 6]);
+        }
+    }
+    
+    if (canCastleQueenside && board[backRank][1] === '' && board[backRank][2] === '' && board[backRank][3] === '') {
+        if (!isSquareUnderAttack(board, backRank, 4, isWhite) &&
+            !isSquareUnderAttack(board, backRank, 3, isWhite) &&
+            !isSquareUnderAttack(board, backRank, 2, isWhite)) {
+            castlingMoves.push([backRank, 2]);
+        }
+    }
+    
+    return castlingMoves;
+}
+
+function isSquareUnderAttack(board: Board, row: number, col: number, isWhite: boolean): boolean {
+    const opponentColor = isWhite ? 'b' : 'w';
+    const directions = [
+        [-1, -1], [-1, 0], [-1, 1],
+        [0, -1],           [0, 1],
+        [1, -1],  [1, 0],  [1, 1]
+    ];
+    
+    // Check for pawn attacks
+    const pawnDirection = isWhite ? 1 : -1;
+    if (isValidPosition(row + pawnDirection, col - 1) && board[row + pawnDirection][col - 1].toLowerCase() === 'p' && isOpponentPiece(board[row + pawnDirection][col - 1], isWhite)) return true;
+    if (isValidPosition(row + pawnDirection, col + 1) && board[row + pawnDirection][col + 1].toLowerCase() === 'p' && isOpponentPiece(board[row + pawnDirection][col + 1], isWhite)) return true;
+
+    // Check for knight attacks
+    const knightMoves = [[-2, -1], [-2, 1], [-1, -2], [-1, 2], [1, -2], [1, 2], [2, -1], [2, 1]];
+    for (const [dr, dc] of knightMoves) {
+        const newRow = row + dr;
+        const newCol = col + dc;
+        if (isValidPosition(newRow, newCol) && board[newRow][newCol].toLowerCase() === 'n' && isOpponentPiece(board[newRow][newCol], isWhite)) return true;
+    }
+
+    // Check for attacks from other pieces (rook, bishop, queen, king)
+    for (const [dr, dc] of directions) {
+        let newRow = row + dr;
+        let newCol = col + dc;
+        let distance = 1;
+        
+        while (isValidPosition(newRow, newCol)) {
+            const piece = board[newRow][newCol].toLowerCase();
+            if (piece !== '') {
+                if (isOpponentPiece(board[newRow][newCol], isWhite)) {
+                    if (piece === 'q' || 
+                        (piece === 'r' && (dr === 0 || dc === 0)) ||
+                        (piece === 'b' && dr !== 0 && dc !== 0) ||
+                        (piece === 'k' && distance === 1)) {
+                        return true;
+                    }
+                }
+                break;
+            }
+            newRow += dr;
+            newCol += dc;
+            distance++;
+        }
+    }
+
+    return false;
 }
 
 function getStraightMoves(board: Board, row: number, col: number, isWhite: boolean): [number, number][] {
@@ -143,31 +227,14 @@ function isOpponentPiece(piece: Piece, isWhite: boolean): boolean {
 
 export function isCheck(board: Board, isWhiteKing: boolean): boolean {
     const kingPiece = isWhiteKing ? 'K' : 'k';
-    let kingRow = -1, kingCol = -1;
-
     for (let row = 0; row < 8; row++) {
         for (let col = 0; col < 8; col++) {
             if (board[row][col] === kingPiece) {
-                kingRow = row;
-                kingCol = col;
-                break;
-            }
-        }
-        if (kingRow !== -1) break;
-    }
-
-    for (let row = 0; row < 8; row++) {
-        for (let col = 0; col < 8; col++) {
-            if (board[row][col] !== '' && isOpponentPiece(board[row][col], isWhiteKing)) {
-                const moves = getValidMoves(board, row, col, false);
-                if (moves.some(([r, c]) => r === kingRow && c === kingCol)) {
-                    return true;
-                }
+                return isSquareUnderAttack(board, row, col, isWhiteKing);
             }
         }
     }
-
-    return false;
+    return false; // This should never happen in a valid chess position
 }
 
 export function isCheckmate(board: Board, isWhiteKing: boolean): boolean {
@@ -177,7 +244,7 @@ export function isCheckmate(board: Board, isWhiteKing: boolean): boolean {
         for (let col = 0; col < 8; col++) {
             const piece = board[row][col];
             if (piece !== '' && (isWhiteKing ? piece === piece.toUpperCase() : piece === piece.toLowerCase())) {
-                const moves = getValidMoves(board, row, col);
+                const moves = getValidMoves(board, row, col, true, false, false);
                 if (moves.length > 0) {
                     return false;
                 }
@@ -188,10 +255,10 @@ export function isCheckmate(board: Board, isWhiteKing: boolean): boolean {
     return true;
 }
 
-function movePutsOwnKingInCheck(board: Board, fromRow: number, fromCol: number, toRow: number, toCol: number): boolean {
+function movePutsOwnKingInCheck(board: Board, fromRow: number, fromCol: number, toRow: number, toCol: number, isWhite: boolean): boolean {
     const newBoard = board.map(row => [...row]);
     newBoard[toRow][toCol] = newBoard[fromRow][fromCol];
     newBoard[fromRow][fromCol] = '';
-    return isCheck(newBoard, newBoard[toRow][toCol] === newBoard[toRow][toCol].toUpperCase());
+    return isCheck(newBoard, isWhite);
 }
 
